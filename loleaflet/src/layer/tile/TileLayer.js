@@ -409,7 +409,7 @@ L.TileLayer = L.GridLayer.extend({
 			className: 'loleaflet-font',
 			items: {
 				modify: {
-					name: _('Comment'),
+					name: ('Comment'),
 					callback: function (key, options) {
 						that.onAnnotationModify.call(that, options.$trigger.get(0).annotation);
 					}
@@ -542,8 +542,8 @@ L.TileLayer = L.GridLayer.extend({
 				'<textarea name="comment" class="loleaflet-annotation-textarea" style="max-width: 400px" required>' + content + '</textarea>'
 			].join(''),
 			buttons: [
-				$.extend({}, vex.dialog.buttons.YES, { text: _('Save') }),
-				$.extend({}, vex.dialog.buttons.NO, { text: _('Cancel') })
+				$.extend({}, vex.dialog.buttons.YES, { text: ('Save') }),
+				$.extend({}, vex.dialog.buttons.NO, { text: ('Cancel') })
 			],
 			callback: function (data) {
 				if (data) {
