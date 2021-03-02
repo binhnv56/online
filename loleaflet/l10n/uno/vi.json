@@ -634,7 +634,6 @@
 "Start upload":"Bắt đầu tải lên",
 "Start cross copy/paste":"Bắt đầu sao chép/dán chéo nhau",
 "Function Wizard":"Trình hướng dẫn chức năng",
-
 "Solid":"Đậm",
 "Linear":"Tuyến tính",
 "Axial":"Trục",
@@ -659,5 +658,7 @@
 "Rows":"Hàng",
 "Columns":"Cột",
 "Insert Table":"Chèn bảng",
-"Line style:":"Kiểu dòng:"
+"Line style:":"Kiểu dòng:",
+"Date":"Ngày",
+"Time":"Giờ"
 }
