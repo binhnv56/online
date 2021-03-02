@@ -660,5 +660,18 @@
 "Insert Table":"Chèn bảng",
 "Line style:":"Kiểu dòng:",
 "Date":"Ngày",
-"Time":"Giờ"
+"Time":"Giờ",
+"hrs":"giờ",
+"mins":"phút",
+"s":"giây",
+"Are you sure you want to delete this page?":"Bạn có chắc chắn muốn xóa trang này không?",
+"Scroll up annotations":"Cuộn chú thích lên",
+"Scroll down annotations":"Cuộn chú thích xuống",
+"Clear the search field":"Xóa trường tìm kiếm",
+"Hide the search bar":"Ẩn thanh tìm kiếm",
+"Scroll to the first sheet":"Di chuyển đến trang tính đầu tiên",
+"Scroll left":"Di chuyển sang trái",
+"Scroll right":"Di chuyển sang phải",
+"Scroll to the last sheet":"Di chuyển đến trang tính cuối cùng",
+"Insert sheet":"Chèn trang tính"
 }
