@@ -161,7 +161,7 @@
 "Fontwork...":"Phông chữ nghệ thuật",
 "~Footnote":"Chú thích cuối trang",
 "F~ourier Analysis...":"Giải tích Fourier",
-"~F-test...":"Kiểm tra F",
+"~F-test...":"F-test",
 "Freeze ~Cells":"Cố định ô",
 "Freeze ~Rows and Columns":"Cố định hàng và cột",
 "Freeze First Column":"Cố định cột đầu tiên",
@@ -218,7 +218,7 @@
 "Insert/Delete Axes...":"Chèn/xóa trục",
 "~Image...":"Ảnh",
 "Italic":"Nghiêng",
-"Justified":"Canh đều 2 bên",
+"Justified":"Căn đều",
 "Language":"Ngôn ngữ",
 "Language Status":"Trạng thái ngôn ngữ",
 "Layout":"Bố trí",
@@ -286,7 +286,7 @@
 "Slant Up":"Nghiêng lên",
 "Sort Ascending":"Sắp xếp tăng dần",
 "Sort Descending":"Sắp xếp giảm dần",
-"~Spacing":"Cách",
+"~Spacing":"Dãn cách Dòng và Đoạn",
 "Split Cells":"Xẻ ô",
 "Split Cells...":"Xẻ ô",
 "Stop":"Dừng lại",
@@ -673,5 +673,7 @@
 "Scroll left":"Di chuyển sang trái",
 "Scroll right":"Di chuyển sang phải",
 "Scroll to the last sheet":"Di chuyển đến trang tính cuối cùng",
-"Insert sheet":"Chèn trang tính"
+"Insert sheet":"Chèn trang tính",
+"%d seconds ago":"%d giây trước",
+"%d minutes ago":"%d phút trước"
 }
