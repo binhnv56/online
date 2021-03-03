@@ -21,6 +21,9 @@ echo "yourusername ALL=(ALL) NOPASSWD: /sbin/setcap"
 echo
 sudo echo "works"
 
+USE_REPO=1
+COLLABORA_ONLINE_REPO=http://10.61.173.6:8929/datvt26/collabora.git
+
 # Check env variables
 if [ -z "$DOCKER_HUB_REPO" ]; then
   DOCKER_HUB_REPO="mydomain/collaboraonline"
@@ -75,26 +78,48 @@ mkdir -p "$INSTDIR"
 
 ##### build static poco #####
 
-if test ! -f poco/lib/libPocoFoundation.a ; then
-    wget https://github.com/pocoproject/poco/archive/poco-1.10.1-release.tar.gz
-    tar -xzf poco-1.10.1-release.tar.gz
-    cd poco-poco-1.10.1-release/
-    ./configure --static --no-tests --no-samples --no-sharedlibs --cflags="-fPIC" --omit=Zip,Data,Data/SQLite,Data/ODBC,Data/MySQL,MongoDB,PDF,CppParser,PageCompiler,Redis,Encodings --prefix=$BUILDDIR/poco
-    make -j 8
-    make install
-    cd ..
+if [ -z "$USE_REPO" ]; then
+
+  if test ! -f poco/lib/libPocoFoundation.a ; then
+      wget https://github.com/pocoproject/poco/archive/poco-1.10.1-release.tar.gz
+      tar -xzf poco-1.10.1-release.tar.gz
+      cd poco-poco-1.10.1-release/
+      ./configure --static --no-tests --no-samples --no-sharedlibs --cflags="-fPIC" --omit=Zip,Data,Data/SQLite,Data/ODBC,Data/MySQL,MongoDB,PDF,CppParser,PageCompiler,Redis,Encodings --prefix=$BUILDDIR/poco
+      make -j 8
+      make install
+      cd ..
+  fi
+
+
+  ##### cloning & updating #####
+
+  # core repo
+  if test ! -d core ; then
+    git clone https://git.libreoffice.org/core || exit 1
+  fi
+
+  ( cd core && git fetch --all && git checkout $CORE_BRANCH && ./g pull -r ) || exit 1
+
+  ##### LOKit (core) #####
+
+  # build
+  if [ "$CORE_BRANCH" == "distro/collabora/cp-6.4" ]; then
+    ( cd core && ./autogen.sh --with-distro=CPLinux-LOKit --disable-epm --without-package-format ) || exit 1
+  else
+    ( cd core && ./autogen.sh --with-distro=LibreOfficeOnline ) || exit 1
+  fi
+  ( cd core && make $CORE_BUILD_TARGET ) || exit 1
+
+else
+
+  # daily-built archive of LibreOffice core
+  if test ! -d core ; then
+    wget https://github.com/CollaboraOnline/online/releases/download/for-code-assets/core-cp-6.4-assets.tar.gz
+    mkdir core
+    tar xvf core-cp-6.4-assets.tar.gz -C core
+  fi
+
 fi
-
-
-##### cloning & updating #####
-
-# core repo
-if test ! -d core ; then
-  git clone https://git.libreoffice.org/core || exit 1
-fi
-
-( cd core && git fetch --all && git checkout $CORE_BRANCH && ./g pull -r ) || exit 1
-
 
 # online repo
 if test ! -d online ; then
@@ -103,15 +128,6 @@ fi
 
 ( cd online && git fetch --all && git checkout -f $COLLABORA_ONLINE_BRANCH && git clean -f -d && git pull -r ) || exit 1
 
-##### LOKit (core) #####
-
-# build
-if [ "$CORE_BRANCH" == "distro/collabora/cp-6.4" ]; then
-  ( cd core && ./autogen.sh --with-distro=CPLinux-LOKit --disable-epm --without-package-format ) || exit 1
-else
-  ( cd core && ./autogen.sh --with-distro=LibreOfficeOnline ) || exit 1
-fi
-( cd core && make $CORE_BUILD_TARGET ) || exit 1
 
 # copy stuff
 mkdir -p "$INSTDIR"/opt/
@@ -121,7 +137,11 @@ cp -a core/instdir "$INSTDIR"/opt/lokit
 
 # build
 ( cd online && ./autogen.sh ) || exit 1
-( cd online && ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --enable-silent-rules --with-lokit-path="$BUILDDIR"/core/include --with-lo-path=/opt/lokit --with-poco-includes=$BUILDDIR/poco/include --with-poco-libs=$BUILDDIR/poco/lib $ONLINE_EXTRA_BUILD_OPTIONS) || exit 1
+if [ -z "$USE_REPO" ]; then
+  ( cd online && ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --enable-silent-rules --with-lokit-path="$BUILDDIR"/core/include --with-lo-path=/opt/lokit --with-poco-includes=$BUILDDIR/poco/include --with-poco-libs=$BUILDDIR/poco/lib $ONLINE_EXTRA_BUILD_OPTIONS) || exit 1
+else
+  ( cd online && ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --enable-debug --enable-silent-rules --with-lokit-path="$BUILDDIR"/core/include --with-lo-path=/opt/lokit $ONLINE_EXTRA_BUILD_OPTIONS) || exit 1
+fi
 ( cd online && make -j 8) || exit 1
 
 # copy stuff
