@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sysexits.h>
+#include <utime.h>
 
 #include <atomic>
 #include <cstdlib>
@@ -451,6 +452,93 @@ static void printArgumentHelp()
     std::cout << "" << std::endl;
 }
 
+static std::string copySrcPath;
+static std::string copyDestPath;
+
+int copyFunction(const char *fpath,
+                 const struct stat* sb,
+                 int typeflag,
+                 struct FTW* /*ftwbuf*/)
+{
+    std::string dest;
+    struct stat st;
+
+    switch (typeflag)
+    {
+    case FTW_SL:
+    {
+        dest = copyDestPath + &fpath[copySrcPath.length()];
+        if (lstat(dest.c_str(), &st) == -1)
+        {
+            const std::size_t size = sb->st_size;
+            char target[size + 1];
+            const ssize_t written = readlink(fpath, target, size);
+            if (written <= 0 || static_cast<std::size_t>(written) > size)
+            {
+                LOG_SYS("nftw: readlink(\"" << fpath << "\") failed");
+                Log::shutdown();
+                std::_Exit(EX_SOFTWARE);
+            }
+            target[written] = '\0';
+
+            //Poco::File(Poco::Path(dest).parent()).createDirectories();
+            if (symlink(target, dest.c_str()) == -1)
+            {
+                LOG_SYS("nftw: symlink(\"" << target << "\", \"" << dest
+                                            << "\") failed");
+                return FTW_STOP;
+            }
+        }
+    }break;
+    case FTW_F:
+        dest = copyDestPath + &fpath[copySrcPath.length()];
+        if (stat(dest.c_str(), &st) == -1)
+        {
+            if (!FileUtil::copy(fpath, dest, /*log=*/false, /*throw_on_error=*/false))
+            {
+                LOG_FTL("Failed to copy [" << fpath << "] to [" << dest << "]. Exiting.");
+                Log::shutdown();
+                std::_Exit(EX_SOFTWARE);
+            }
+        }
+        break;
+    case FTW_D:
+        {
+            if (stat(fpath, &st) == -1)
+            {
+                LOG_SYS("nftw: stat(\"" << fpath << "\") failed");
+                return FTW_STOP;
+            }
+
+            dest = copyDestPath + &fpath[copySrcPath.length()];
+            LOG_DBG("Copy from " << fpath << " to " << dest);
+            Poco::File(dest).createDirectory();
+
+            struct utimbuf ut;
+            ut.actime = st.st_atime;
+            ut.modtime = st.st_mtime;
+            if (utime(dest.c_str(), &ut) == -1)
+            {
+                LOG_SYS("nftw: utime(\"" << dest << "\") failed");
+                return FTW_STOP;
+            }
+        }
+        break;
+    case FTW_DNR:
+        LOG_ERR("nftw: Cannot read directory '" << fpath << '\'');
+        return FTW_STOP;
+    case FTW_NS:
+        LOG_ERR("nftw: stat failed for '" << fpath << '\'');
+        return FTW_STOP;
+    default:
+        LOG_FTL("nftw: unexpected typeflag: '" << typeflag);
+        assert(!"nftw: unexpected typeflag.");
+        return FTW_CONTINUE;
+    }
+
+    return FTW_CONTINUE;
+}
+
 int changeOwnerToRootFunction(const char *fpath,
                                 const struct stat* /*sb*/,
                                 int typeflag,
@@ -483,23 +571,28 @@ int changeOwnerToRootFunction(const char *fpath,
     return FTW_CONTINUE;
 }
 
-bool copyAndChangeOwner(std::string& source)
+bool copyAndChangeOwner(const std::string& srcPath, const std::string& destPath)
 {
-    std::string srcRes = FileUtil::realpath(source);
-    std::string dest;
+    Poco::File(destPath).createDirectories();
 
-    if (srcRes.back() == '/')
-        srcRes.pop_back();
-    dest = srcRes + "_tmp";
+    std::string src = FileUtil::realpath(srcPath);
+    std::string dest = FileUtil::realpath(destPath);
 
-    Poco::File(dest).createDirectories();
-    // Here it is essential to execute a copy SHELL command.
-    // This is for fixing slow hard-linking issue in overlay2
-    // file system driver.
-    std::string cmd = std::string("cp -a ") + srcRes + "/. " + dest;
-    if (system(cmd.c_str()))
+    if (src.back() == '/')
+        src.pop_back();
+    if (dest.back() == '/')
+        dest.pop_back();
+
+    bool samePath = (src == dest);
+    if (samePath)
+        dest = Poco::Path(dest).setFileName(FileUtil::createRandomDir(Poco::Path(destPath).parent().toString())).toString();
+
+    copySrcPath = src;
+    copyDestPath = dest;
+
+    if (nftw(src.c_str(), copyFunction, 10, FTW_ACTIONRETVAL|FTW_PHYS))
     {
-        LOG_ERR("Failed to copy through shell command from " << srcRes << " to " << dest << " while preparing for hard-linking.");
+        LOG_ERR("Failed to change owner while preparing for hard-linking.");
         FileUtil::removeFile(dest, true);
         return false;
     }
@@ -511,17 +604,28 @@ bool copyAndChangeOwner(std::string& source)
     if (nftw(dest.c_str(), changeOwnerToRootFunction, 10, FTW_ACTIONRETVAL|FTW_PHYS))
     {
         LOG_ERR("Failed to change owner while preparing for hard-linking.");
-        FileUtil::removeFile(dest, true);
+        FileUtil::removeFile(copyDestPath, true);
         return false;
     }
 
-    // Remove original folder and rename new folder back to original folder's name
-    FileUtil::removeFile(srcRes, true);
-    if (::rename(dest.c_str(), srcRes.c_str()))
+    if (samePath)
     {
-        LOG_INF("Failed to rename " << dest << " to " << srcRes << "with error: " << strerror(errno));
-        return false;
+        // Remove original folder and rename new folder back to original folder's name
+        FileUtil::removeFile(src, true);
+        if (::rename(dest.c_str(), src.c_str()))
+        {
+            LOG_INF("Failed to rename " << dest << " to " << src << "with error: " << strerror(errno));
+            return false;
+        }
     }
+    else
+    {
+        // Remove original folder and rename new folder back to original folder's name
+        // Should we remove ? For now disable.
+        //FileUtil::removeFile(srcPath, true);
+    }
+
+    LOG_INF("Successfully copied and changed owner");
 
     return true;
 }
@@ -533,13 +637,23 @@ bool copyAndChangeOwner(std::string& source)
 // This is faster and the result is that the copy of the original folder is
 // brought in container's layer and thus hard-linking is very fast because
 // there is no need to perform copy-on-write from a lower level.
-bool prepareForHardLinking(std::string& sysTemplate, std::string& loTemplate)
+// To avoid cross-device issues we'll copy as close to the jails as possible.
+bool prepareForHardLinking(std::string& sysTemplate, std::string& loTemplate, const std::string& /*childRoot*/)
 {
-    if (!copyAndChangeOwner(sysTemplate))
+    // For now a different path than the original one is not working.
+    // The kit process fails at initialization. Just use the same path.
+    //std::string destParent = FileUtil::realpath(childRoot) + "/linkable/";
+    std::string dest = sysTemplate;
+    //std::string dest = destParent + Poco::Path(sysTemplate).getFileName();
+    if (!copyAndChangeOwner(sysTemplate, dest))
         return false;
+    sysTemplate = dest;
 
-    if (!copyAndChangeOwner(loTemplate))
+    dest = loTemplate;
+    //dest = destParent + Poco::Path(loTemplate).getFileName();
+    if (!copyAndChangeOwner(loTemplate, dest))
         return false;
+    loTemplate = dest;
 
     return true;
 }
@@ -750,6 +864,15 @@ int main(int argc, char** argv)
         return EX_SOFTWARE;
     }
 
+    // Perform this in forkit because it needs to be performed only once
+    // and if performed in kit then there is need to sync between multiple
+    // kit instances.
+    // TO FIX: avoid running it unless hard-linking will be performed.
+    if (prepareForHardLinking(sysTemplate, loTemplate, childRoot))
+        LOG_INF("prepareForHardLinking succeeded. systemplate:" << sysTemplate << "   lotemplate " << loTemplate);
+    else
+        LOG_WRN("prepareForHardLinking failed.");
+
     // Initialize LoKit
     if (!globalPreinit(loTemplate))
     {
@@ -760,15 +883,6 @@ int main(int argc, char** argv)
 
     if (Util::getProcessThreadCount() != 1)
         LOG_ERR("Error: forkit has more than a single thread after pre-init");
-
-    // Perform this in forkit because it needs to be performed only once
-    // and if performed in kit then there is need to sync between multiple
-    // kit instances.
-    // TO FIX: avoid running it unless hard-linking will be performed.
-    if (prepareForHardLinking(sysTemplate, loTemplate))
-        LOG_INF("prepareForHardLinking succeeded.");
-    else
-        LOG_INF("prepareForHardLinking failed.");
 
     // Link the network and system files in sysTemplate, if possible.
     JailUtil::SysTemplate::setupDynamicFiles(sysTemplate);
