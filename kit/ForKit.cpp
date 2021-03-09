@@ -454,12 +454,19 @@ static void printArgumentHelp()
 
 static std::string copySrcPath;
 static std::string copyDestPath;
+static int optimStatus = 0;
+static std::string evalPath;
 
 int copyFunction(const char *fpath,
                  const struct stat* sb,
                  int typeflag,
                  struct FTW* /*ftwbuf*/)
 {
+    static std::chrono::steady_clock::time_point startTime;
+    static std::chrono::nanoseconds copyTime;
+    static std::chrono::nanoseconds linkTime;
+    static int filesToEvaluate = 10;
+
     std::string dest;
     struct stat st;
 
@@ -476,8 +483,7 @@ int copyFunction(const char *fpath,
             if (written <= 0 || static_cast<std::size_t>(written) > size)
             {
                 LOG_SYS("nftw: readlink(\"" << fpath << "\") failed");
-                Log::shutdown();
-                std::_Exit(EX_SOFTWARE);
+                return FTW_STOP;
             }
             target[written] = '\0';
 
@@ -494,11 +500,40 @@ int copyFunction(const char *fpath,
         dest = copyDestPath + &fpath[copySrcPath.length()];
         if (stat(dest.c_str(), &st) == -1)
         {
+            if (!optimStatus)
+            {
+                startTime = std::chrono::steady_clock::now();
+            }
             if (!FileUtil::copy(fpath, dest, /*log=*/false, /*throw_on_error=*/false))
             {
                 LOG_FTL("Failed to copy [" << fpath << "] to [" << dest << "]. Exiting.");
-                Log::shutdown();
-                std::_Exit(EX_SOFTWARE);
+                return FTW_STOP;
+            }
+            if (!optimStatus)
+            {
+                const auto endTime = std::chrono::steady_clock::now();
+
+                if (link(fpath, (evalPath + &fpath[copySrcPath.length()]).c_str()) == 0)
+                {
+                    // Accumulate working time for each case
+                    copyTime += endTime - startTime;
+                    linkTime += std::chrono::steady_clock::now() - endTime;
+                }
+                else
+                    LOG_WRN("Failed hard link to " << fpath << " from " << evalPath + &fpath[copySrcPath.length()] << " with error " << errno);
+
+                if (!--filesToEvaluate)
+                {
+                    LOG_INF("Link time: " << std::chrono::duration_cast<std::chrono::milliseconds>(linkTime).count() << " ms. Copy time: " << std::chrono::duration_cast<std::chrono::milliseconds>(copyTime).count() << " ms.");
+                    // In case the link time is lower than copy time then optimization is useless. Abort.
+                    if (linkTime.count() <= copyTime.count())
+                    {
+                        optimStatus = 2;
+                        LOG_WRN("Hard linking optimization useless. Aborted.");
+                        return FTW_STOP;
+                    }
+                    optimStatus = 1;
+                }
             }
         }
         break;
@@ -513,6 +548,10 @@ int copyFunction(const char *fpath,
             dest = copyDestPath + &fpath[copySrcPath.length()];
             LOG_DBG("Copy from " << fpath << " to " << dest);
             Poco::File(dest).createDirectory();
+            if (!optimStatus)
+            {
+                Poco::File(evalPath + &fpath[copySrcPath.length()]).createDirectory();
+            }
 
             struct utimbuf ut;
             ut.actime = st.st_atime;
@@ -573,6 +612,9 @@ int changeOwnerToRootFunction(const char *fpath,
 
 bool copyAndChangeOwner(const std::string& srcPath, const std::string& destPath)
 {
+    if (optimStatus == 2)
+        return false;
+
     Poco::File(destPath).createDirectories();
 
     std::string src = FileUtil::realpath(srcPath);
@@ -587,6 +629,9 @@ bool copyAndChangeOwner(const std::string& srcPath, const std::string& destPath)
     if (samePath)
         dest = Poco::Path(dest).setFileName(FileUtil::createRandomDir(Poco::Path(destPath).parent().toString())).toString();
 
+    if (!optimStatus)
+        evalPath = Poco::Path(dest).setFileName(FileUtil::createRandomDir(Poco::Path(destPath).parent().toString())).toString();
+
     copySrcPath = src;
     copyDestPath = dest;
 
@@ -594,6 +639,7 @@ bool copyAndChangeOwner(const std::string& srcPath, const std::string& destPath)
     {
         LOG_ERR("Failed to change owner while preparing for hard-linking.");
         FileUtil::removeFile(dest, true);
+        FileUtil::removeFile(evalPath, true);
         return false;
     }
 
@@ -605,6 +651,7 @@ bool copyAndChangeOwner(const std::string& srcPath, const std::string& destPath)
     {
         LOG_ERR("Failed to change owner while preparing for hard-linking.");
         FileUtil::removeFile(copyDestPath, true);
+        FileUtil::removeFile(evalPath, true);
         return false;
     }
 
@@ -624,6 +671,8 @@ bool copyAndChangeOwner(const std::string& srcPath, const std::string& destPath)
         // Should we remove ? For now disable.
         //FileUtil::removeFile(srcPath, true);
     }
+
+    FileUtil::removeFile(evalPath, true);
 
     LOG_INF("Successfully copied and changed owner");
 
