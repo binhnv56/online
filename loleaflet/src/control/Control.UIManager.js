@@ -44,7 +44,7 @@ L.Control.UIManager = L.Control.extend({
 			this.map.addControl(menubar);
 		}
 
-		if (window.mode.isMobile()) {
+		if (window.mode.isMobile() && this._map._docLayer) {
 			$('#mobile-edit-button').show();
 		} else {
 			if (!enableNotebookbar) {
